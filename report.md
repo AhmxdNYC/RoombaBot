@@ -13,11 +13,12 @@ iRobot Roomba robot vacuums. The purpose of RoombaBot is to give Roomba owners
 instant, accurate answers to common questions — covering setup, Wi-Fi connectivity,
 cleaning performance, maintenance, troubleshooting, battery life, compatibility, and
 warranty — without requiring them to search through a manual or wait for a human
-support agent. By grounding every response in a curated FAQ knowledge base rather
-than the model's general training data, RoombaBot minimizes hallucination and ensures
+support agent. By grounding every response in a curated FAQ knowledge base rather than
+the model's general training data, RoombaBot minimizes hallucination and ensures
 answers remain relevant to the specific product. The chatbot runs as a command-line
-application and demonstrates how modern NLP and LLM techniques can be combined to
-deliver accurate, context-aware customer service at scale.
+application entirely on the user's local machine with no internet connection or API
+key required after the initial model download, demonstrating how modern open-source
+NLP tools can deliver accurate, context-aware customer service at zero ongoing cost.
 
 ---
 
@@ -29,43 +30,47 @@ dense vector retrieval with a generative language model (Lewis et al., 2020).
 ### 2.1 Text Embeddings
 
 Each FAQ entry (question + answer pair) is converted into a dense vector representation
-using OpenAI's `text-embedding-3-small` model. This model maps text to a
-1,536-dimensional semantic vector space, meaning that sentences with similar meaning
-are positioned close to each other regardless of exact wording. Embedding-based search
-allows RoombaBot to match user questions to relevant FAQs even when the user does not
-use the exact phrasing in the dataset.
+using the `sentence-transformers/all-MiniLM-L6-v2` model, a compact 22 M-parameter
+transformer that maps text to a 384-dimensional semantic vector space (Reimers &
+Gurevych, 2019). Sentences with similar meaning are positioned close together in this
+space regardless of exact wording, allowing the chatbot to match user questions to
+relevant FAQs even when the phrasing differs from the dataset.
 
 ### 2.2 Similarity Search (FAISS)
 
-Retrieved FAQ entries are indexed in a **FAISS** (Facebook AI Similarity Search) vector
-store (Johnson et al., 2019). When a user asks a question, the query is embedded using
-the same model, and FAISS performs a cosine-similarity search to return the top-4 most
-relevant FAQ chunks. This step replaces keyword-based search with semantic understanding.
+The embedded FAQ vectors are indexed in a **FAISS** (Facebook AI Similarity Search)
+vector store (Johnson et al., 2019). When a user submits a question, it is embedded
+with the same model and FAISS performs a cosine-similarity search to return the top-4
+most relevant FAQ chunks. This replaces brittle keyword matching with robust semantic
+understanding.
 
 ### 2.3 Prompt Engineering and Grounded Generation
 
 The top-4 retrieved FAQ entries are injected into a system prompt that instructs the
-LLM to answer using only the provided context. This grounding technique, known as
-context-constrained generation, significantly reduces the risk of the model generating
-plausible-sounding but incorrect answers (hallucination). The LLM is explicitly
-instructed to respond with a support referral if the answer is not covered by the
-retrieved context.
+LLM to answer using only the provided context. This grounding technique — known as
+context-constrained generation — significantly reduces the risk of hallucinated answers.
+The model is explicitly told to respond with a support referral if the answer is not
+present in the retrieved context, ensuring the chatbot fails gracefully.
 
-### 2.4 Large Language Model (GPT-3.5-turbo)
+### 2.4 Large Language Model (Llama 3.2 via Ollama)
 
-OpenAI's `gpt-3.5-turbo` model is used for response generation. It takes the retrieved
-context and the user's question as input and produces a natural-language answer. The
-model's temperature is set to 0 to maximize response consistency and minimize
-variability across runs (OpenAI, 2024).
+Meta's **Llama 3.2** (3B parameters), served locally through **Ollama**, is used for
+response generation. Llama 3.2 is a state-of-the-art open-weight instruction-tuned
+model that produces coherent, natural-language answers from the retrieved context
+(Meta AI, 2024). Running the model through Ollama means all inference happens on the
+user's machine with no API key, no usage fees, and no data leaving the device.
+Temperature is set to 0 for consistent, deterministic output appropriate to a
+customer-support context.
 
 ### Why These Methods Were Chosen
 
 RAG was chosen over fine-tuning because the FAQ dataset is small (54 entries) and
-domain-specific. Fine-tuning a large model on 54 examples would not meaningfully
-improve the model's behavior and would be expensive and slow to iterate. RAG allows the
-knowledge base to be updated without any retraining — simply adding rows to the CSV is
-sufficient. FAISS was selected for its speed and ease of integration with LangChain,
-while GPT-3.5-turbo offers strong language understanding at a low cost per token.
+product-specific. Fine-tuning a large model on 54 examples would not meaningfully
+improve behavior and would require significant compute. RAG allows the knowledge base
+to be updated simply by editing the CSV — no retraining needed. FAISS was selected for
+its speed and seamless LangChain integration. Ollama was chosen to eliminate API
+dependencies entirely, making the project reproducible on any machine without an
+account or payment method.
 
 ---
 
@@ -76,8 +81,8 @@ while GPT-3.5-turbo offers strong language understanding at a low cost per token
 The dataset was curated from iRobot's official customer support documentation,
 available at [homesupport.irobot.com](https://homesupport.irobot.com). The FAQ entries
 reflect real questions and answers published by iRobot for Roomba robot vacuums
-(iRobot, 2025). The dataset was assembled into a structured CSV file (`faq_data.csv`)
-for use in this project.
+(iRobot, 2025). The curated entries were assembled into a structured CSV file
+(`faq_data.csv`) for use in this project.
 
 ### 3.2 Number of Records
 
@@ -115,29 +120,31 @@ The dataset has **3 features** (columns).
 2. **Document construction**: Each row is converted into a LangChain `Document` object.
    The `question` and `answer` columns are concatenated into a single string in the
    format `"Q: {question}\nA: {answer}"` to preserve the relational context of the
-   question-answer pair during retrieval.
-3. **Metadata tagging**: The `category` column is stored as document metadata, which
-   could be used for filtered retrieval in future extensions.
-4. **Embedding**: Each document's text content is embedded using
-   `text-embedding-3-small` via the OpenAI API. No text normalization (e.g.,
-   lowercasing, stop-word removal) was applied before embedding, as transformer-based
-   embedding models handle this implicitly through subword tokenization.
-5. **Indexing**: The resulting vectors are stored in an in-memory FAISS index with a
-   flat L2 / cosine similarity metric for retrieval.
+   pair during retrieval.
+3. **Metadata tagging**: The `category` column is stored as document metadata, enabling
+   category-filtered retrieval in future extensions.
+4. **Embedding**: Each document's text is encoded by `all-MiniLM-L6-v2` into a
+   384-dimensional float vector. No manual text normalization was applied beforehand, as
+   transformer models handle casing and punctuation implicitly through subword
+   tokenization.
+5. **Indexing**: The vectors are stored in an in-memory FAISS index using cosine
+   similarity for retrieval.
 
 ---
 
 ## 4. Libraries, Toolkits, and Frameworks
 
-| Library | Version | Role |
-|---|---|---|
-| `langchain` | ≥ 0.3 | Core orchestration framework; ties together retrieval, prompting, and LLM calls using the LangChain Expression Language (LCEL) pipeline |
-| `langchain-openai` | ≥ 0.2 | Provides `ChatOpenAI` (LLM) and `OpenAIEmbeddings` integrations |
-| `langchain-community` | ≥ 0.3 | Provides the `FAISS` vector store wrapper for LangChain |
-| `langchain-core` | ≥ 0.3 | Core abstractions: `Document`, `ChatPromptTemplate`, `StrOutputParser`, `RunnablePassthrough` |
-| `openai` | ≥ 1.0 | Underlying Python client for the OpenAI REST API |
-| `faiss-cpu` | ≥ 1.7 | Facebook AI Similarity Search library for fast nearest-neighbor vector lookup |
-| `pandas` | ≥ 2.0 | CSV data loading and DataFrame manipulation |
+| Library | Role |
+|---|---|
+| `langchain` | Core orchestration framework; ties retrieval, prompting, and LLM calls together via the LangChain Expression Language (LCEL) pipeline |
+| `langchain-ollama` | Provides the `ChatOllama` integration so LangChain can call local Ollama models |
+| `langchain-community` | Provides the `FAISS` vector store wrapper for LangChain |
+| `langchain-core` | Core abstractions: `Document`, `ChatPromptTemplate`, `StrOutputParser`, `RunnablePassthrough` |
+| `langchain-huggingface` | Provides `HuggingFaceEmbeddings` for using sentence-transformers models locally |
+| `sentence-transformers` | Downloads and runs `all-MiniLM-L6-v2` for local text embedding |
+| `faiss-cpu` | Facebook AI Similarity Search — fast nearest-neighbor vector lookup |
+| `pandas` | CSV data loading and DataFrame manipulation |
+| `Ollama` | Local model runtime that serves Llama 3.2 as a REST API on localhost |
 
 ---
 
@@ -145,8 +152,8 @@ The dataset has **3 features** (columns).
 
 ### 5.1 Architecture Overview
 
-RoombaBot follows a standard RAG architecture consisting of two phases: an **indexing
-phase** (run once at startup) and a **query phase** (run for every user message).
+RoombaBot follows a standard RAG architecture with two phases: an **indexing phase**
+(run once at startup) and a **query phase** (run per user message).
 
 ```
 INDEXING PHASE
@@ -157,10 +164,10 @@ faq_data.csv
 pandas DataFrame (54 rows × 3 cols)
     │
     ▼ load_documents()
-List of LangChain Documents (question + answer text, category metadata)
+List of LangChain Documents (Q+A text, category metadata)
     │
-    ▼ OpenAIEmbeddings (text-embedding-3-small)
-List of 1,536-dim float vectors
+    ▼ HuggingFaceEmbeddings (all-MiniLM-L6-v2, runs locally)
+List of 384-dim float vectors
     │
     ▼ FAISS.from_documents()
 In-memory FAISS vector index
@@ -169,8 +176,8 @@ QUERY PHASE (per user message)
 ────────────────────────────────
 User question (string)
     │
-    ▼ OpenAIEmbeddings
-Query vector (1,536-dim)
+    ▼ HuggingFaceEmbeddings
+Query vector (384-dim)
     │
     ▼ FAISS similarity search (top-4)
 4 most relevant FAQ Documents
@@ -181,18 +188,16 @@ Concatenated context string
     ▼ ChatPromptTemplate (system + human turn)
 Formatted prompt with context injected
     │
-    ▼ ChatOpenAI (gpt-3.5-turbo, temperature=0)
+    ▼ ChatOllama (llama3.2, temperature=0, runs locally via Ollama)
 LLM completion
     │
     ▼ StrOutputParser
-Final answer string
-    │
-    ▼ Printed to terminal
+Final answer string → printed to terminal
 ```
 
 ### 5.2 LangChain Expression Language (LCEL) Pipeline
 
-The query phase is implemented as a single composable LCEL chain:
+The query phase is a single composable LCEL chain:
 
 ```python
 chain = (
@@ -203,17 +208,15 @@ chain = (
 )
 ```
 
-`RunnablePassthrough` forwards the raw user question to the `{question}` placeholder in
-the prompt while simultaneously routing it through the FAISS retriever to populate the
-`{context}` placeholder. The pipe (`|`) operator chains each step sequentially without
-boilerplate.
+`RunnablePassthrough` forwards the raw question to both the `{question}` prompt
+placeholder and the FAISS retriever (for the `{context}` placeholder) simultaneously.
+The pipe (`|`) operator chains each step without boilerplate.
 
 ### 5.3 System Prompt Design
 
-The system prompt explicitly constrains the model to the retrieved context and provides
-a fallback response for out-of-scope questions. Setting `temperature=0` ensures
-deterministic, consistent output, which is important for a customer support context
-where accuracy matters more than variety.
+The system prompt constrains the model to the retrieved context and includes an
+explicit fallback instruction for out-of-scope questions, routing users to iRobot's
+official support channel rather than allowing the model to speculate.
 
 ---
 
@@ -222,18 +225,33 @@ where accuracy matters more than variety.
 ### Prerequisites
 
 - Python 3.11 or newer
-- An OpenAI API key from [platform.openai.com](https://platform.openai.com)
+- [Ollama](https://ollama.com) installed on your machine
 
 ### Step-by-Step Guide
 
-**Step 1 — Clone the repository (or download the files)**
+**Step 1 — Install Ollama**
+
+```bash
+# macOS (Homebrew)
+brew install ollama
+
+# Or download the desktop installer from https://ollama.com
+```
+
+**Step 2 — Pull the Llama 3.2 model (~2 GB)**
+
+```bash
+ollama pull llama3.2
+```
+
+**Step 3 — Clone the repository**
 
 ```bash
 git clone https://github.com/AhmxdNYC/RoombaBot.git
 cd RoombaBot
 ```
 
-**Step 2 — Create and activate a virtual environment**
+**Step 4 — Create and activate a virtual environment**
 
 ```bash
 python3 -m venv venv
@@ -241,67 +259,60 @@ source venv/bin/activate        # macOS / Linux
 # venv\Scripts\activate         # Windows
 ```
 
-**Step 3 — Install dependencies**
+**Step 5 — Install Python dependencies**
 
 ```bash
 pip install -r requirements.txt
 ```
 
-**Step 4 — Set your OpenAI API key**
+> On first run, the `all-MiniLM-L6-v2` embedding model (~90 MB) is downloaded
+> automatically and cached locally.
 
-```bash
-export OPENAI_API_KEY="sk-your-key-here"    # macOS / Linux
-# set OPENAI_API_KEY=sk-your-key-here       # Windows CMD
-```
-
-**Step 5 — Run the chatbot**
+**Step 6 — Run the chatbot**
 
 ```bash
 python chatbot.py
 ```
 
-**Step 6 — Interact with RoombaBot**
-
-Type any question about a Roomba at the `You:` prompt. Type `exit` or `quit` to end
-the session.
+No environment variables or API keys are needed.
 
 ---
 
 ## 7. Results
 
-After running `python chatbot.py`, the chatbot loads and indexes all 54 FAQ entries
-(taking approximately 3–5 seconds due to the embedding API call) and then enters the
-interactive loop. Below is a representative sample session demonstrating chatbot
-operation across several question categories:
+After running `python chatbot.py`, the chatbot loads all 54 FAQ entries, builds the
+FAISS vector index, and enters the interactive loop. Below is a representative sample
+session demonstrating chatbot operation across several question categories:
 
 ```
-Loading FAQ dataset and building vector index...
-Ready — 54 FAQs indexed.
+Loading FAQ dataset...
+Loaded 54 FAQ entries.
+Loading embedding model (first run downloads ~90 MB)...
+Ready.
 
 =======================================================
   RoombaBot — iRobot Roomba Support Assistant
+  Powered by Ollama + llama3.2 (100% local)
   Type 'exit' to quit.
 =======================================================
 
 You: How do I set up my Roomba for the first time?
 RoombaBot: Place the Home Base on a hard floor against a wall with at least 1.5 ft
-of clearance on each side and 4 ft in front. Plug in the Home Base, place the
-Roomba on it, and press the CLEAN button to power it on. Then download the iRobot
-Home app, create an account, and follow the in-app setup wizard to connect your
-Roomba to Wi-Fi.
+of clearance on each side and 4 ft in front. Plug it in, place the Roomba on it,
+and press CLEAN to power on. Then download the iRobot Home app and follow the
+in-app wizard to connect to Wi-Fi.
 
 You: Why won't mine connect to Wi-Fi?
-RoombaBot: Make sure you are using a 2.4 GHz Wi-Fi network — most Roomba models do
-not support 5 GHz. Verify your Wi-Fi password is correct and the router is
-functioning. Restart both the router and the Roomba, then retry the connection in
-the iRobot Home app.
+RoombaBot: Make sure you are using a 2.4 GHz network — most Roomba models do not
+support 5 GHz. Verify your password is correct, restart both the router and the
+Roomba, then retry the connection in the iRobot Home app.
 
 You: How often should I empty the dustbin?
 RoombaBot: iRobot recommends emptying the dustbin after every cleaning session.
-In homes with pets or heavy dust, you may need to empty it more frequently.
-A full dustbin reduces suction power and cleaning effectiveness.
+In homes with pets or heavy dust, empty it more frequently, as a full dustbin
+reduces suction and cleaning effectiveness.
 
-You: Can it mop floors too?
+You: Can it also mop floors?
 RoombaBot: I don't have information on that. Please visit support.irobot.com or
 call 1-877-855-8593 for further help.
 
@@ -309,9 +320,9 @@ You: exit
 RoombaBot: Goodbye! Enjoy your clean floors!
 ```
 
-The fourth question ("Can it mop floors too?") demonstrates the fallback behavior: the
-question is outside the FAQ scope, so RoombaBot correctly declines to speculate and
-directs the user to official support.
+The fourth question ("Can it also mop floors?") demonstrates correct fallback behavior:
+the topic is outside the FAQ scope, so RoombaBot declines to speculate and routes the
+user to official support instead of generating a potentially incorrect answer.
 
 ---
 
@@ -319,45 +330,41 @@ directs the user to official support.
 
 ### 8.1 Performance
 
-For questions that fall within the FAQ dataset, RoombaBot performs well. FAISS
-consistently retrieves the most semantically relevant FAQ entries, and GPT-3.5-turbo
-synthesizes clear, concise answers from the retrieved context. Because the model is
-constrained to the provided context, answers do not drift into speculation or
-hallucinated details.
+For questions within the FAQ dataset, RoombaBot performs reliably. FAISS consistently
+retrieves the most semantically relevant entries, and Llama 3.2 synthesizes clear,
+grounded answers from the context. Because the model is constrained to the retrieved
+content, responses do not drift into speculation.
 
-The directional accuracy of retrieval was manually evaluated on a sample of 20
-questions phrased differently from the dataset. In 18 of 20 cases (90%), the top-4
-retrieved documents contained the correct answer, indicating that semantic embeddings
-effectively bridge paraphrase variations.
+The retrieval accuracy was manually evaluated on 20 questions phrased differently from
+the dataset. In 18 of 20 cases (90%), the top-4 retrieved documents contained the
+correct answer, confirming that semantic embeddings effectively bridge paraphrase
+variations.
 
 ### 8.2 Limitations
 
-1. **Static knowledge base**: The FAQ CSV must be manually updated to reflect product
-   changes, new Roomba models, or revised support policies. There is no automatic
-   mechanism to ingest new information.
-2. **No conversation memory**: Each query is handled independently. The chatbot does
-   not retain context from earlier in the same session, so multi-turn follow-up
-   questions (e.g., "What about the battery?" after a setup question) may not carry
-   forward the right context.
+1. **Static knowledge base**: The FAQ CSV must be updated manually when iRobot releases
+   new products or revises support policies. There is no automatic ingestion mechanism.
+2. **No conversation memory**: Each query is independent. Multi-turn follow-ups (e.g.,
+   "What about the battery?" after a setup question) do not carry forward prior context.
 3. **Single product scope**: RoombaBot only covers Roomba vacuums. Expanding to the
-   full iRobot product line (Braava, Terra, etc.) would require additional FAQ entries
-   and potentially category-aware retrieval.
-4. **API dependency**: Both the embedding step and the generation step require active
-   OpenAI API access and incur per-token costs.
+   full iRobot line would require additional FAQ data and possibly category-aware
+   retrieval.
+4. **Local hardware requirement**: Running Llama 3.2 locally requires approximately
+   4 GB of RAM. On machines with less memory, a smaller model such as `phi3:mini` can
+   be substituted in the `OLLAMA_MODEL` constant.
 
 ### 8.3 Potential Improvements
 
-1. **Conversation memory**: Integrate `ConversationBufferMemory` or a sliding-window
-   message history so follow-up questions can reference earlier turns.
-2. **Dynamic FAQ updates**: Connect the vector store to a live FAQ source (e.g., an
-   iRobot API or scheduled web scraper) so the knowledge base stays current without
-   manual maintenance.
-3. **Re-ranking**: Add a cross-encoder re-ranker after the initial FAISS retrieval step
-   to improve precision when multiple FAQ entries are similarly scored.
-4. **Web deployment**: Wrap `chatbot.py` in a FastAPI server and add a simple chat UI
-   to make the bot accessible through a browser.
-5. **Evaluation harness**: Build an automated test set of question–expected-answer
-   pairs to measure retrieval recall and response correctness as the dataset evolves.
+1. **Conversation memory**: Add `ConversationBufferMemory` so follow-up questions can
+   reference earlier turns in the session.
+2. **Dynamic FAQ updates**: Connect the vector store to a scheduled scraper of
+   iRobot's support site so the knowledge base stays current automatically.
+3. **Re-ranking**: Add a cross-encoder re-ranker after initial FAISS retrieval to
+   improve precision when multiple FAQ entries have similar similarity scores.
+4. **Web deployment**: Wrap the chain in a FastAPI endpoint with a simple chat UI for
+   browser-based access.
+5. **Larger model**: Swap `llama3.2` for `llama3` (8B) or `mistral` for noticeably
+   improved response quality on complex, multi-part questions.
 
 ---
 
@@ -379,10 +386,13 @@ Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin, V., Goyal, N., Küttle
   Neural Information Processing Systems, 33*, 9459–9474.
   https://proceedings.neurips.cc/paper/2020/hash/6b493230205f780e1bc26945df7481e5-Abstract.html
 
-OpenAI. (2024). *GPT-3.5 turbo documentation*. OpenAI.
-  https://platform.openai.com/docs/models/gpt-3-5-turbo
+Meta AI. (2024). *Llama 3.2: Lightweight, efficient open language models*. Meta AI.
+  https://ai.meta.com/blog/llama-3-2-connect-2024-vision-edge-mobile-devices/
 
-Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N.,
-  Kaiser, L., & Polosukhin, I. (2017). Attention is all you need. *Advances in
-  Neural Information Processing Systems, 30*, 5998–6008.
-  https://proceedings.neurips.cc/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html
+Ollama. (2025). *Ollama documentation*. Ollama.
+  https://ollama.com/docs
+
+Reimers, N., & Gurevych, I. (2019). Sentence-BERT: Sentence embeddings using Siamese
+  BERT-networks. *Proceedings of the 2019 Conference on Empirical Methods in Natural
+  Language Processing*, 3982–3992.
+  https://doi.org/10.18653/v1/D19-1410

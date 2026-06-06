@@ -1,29 +1,37 @@
 """
 RoombaBot — FAQ Chatbot for iRobot Roomba
 ==========================================
-LangChain + OpenAI GPT-3.5-turbo + FAISS RAG pipeline.
+LangChain + Ollama (llama3.2) + FAISS RAG pipeline.
+Runs entirely locally — no API key required.
+
+Prerequisites:
+    1. Install Ollama:  https://ollama.com
+    2. Pull the model:  ollama pull llama3.2
+    3. Keep Ollama running in the background (it starts automatically on most systems)
 
 Usage:
-    export OPENAI_API_KEY="sk-..."
     python chatbot.py
 """
 
-import os
 import sys
+import warnings
 import pandas as pd
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_ollama import ChatOllama
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
 # ── Configuration ──────────────────────────────────────────────────────────────
-FAQ_CSV     = "faq_data.csv"
-LLM_MODEL   = "gpt-3.5-turbo"
-EMBED_MODEL = "text-embedding-3-small"
-TOP_K       = 4          # number of FAQ chunks retrieved per query
+FAQ_CSV      = "faq_data.csv"
+OLLAMA_MODEL = "llama3.2"        # change to "llama3" for the 8B model
+EMBED_MODEL  = "sentence-transformers/all-MiniLM-L6-v2"  # ~90 MB, auto-downloaded
+TOP_K        = 4
 
 SYSTEM_PROMPT = (
     "You are RoombaBot, a friendly and knowledgeable customer support assistant "
@@ -56,7 +64,8 @@ def load_documents(csv_path: str) -> list[Document]:
 
 # ── RAG Pipeline ───────────────────────────────────────────────────────────────
 def build_chain(docs: list[Document]):
-    embeddings  = OpenAIEmbeddings(model=EMBED_MODEL)
+    print("Loading embedding model (first run downloads ~90 MB)...")
+    embeddings  = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
     vectorstore = FAISS.from_documents(docs, embeddings)
     retriever   = vectorstore.as_retriever(
         search_type="similarity",
@@ -66,7 +75,7 @@ def build_chain(docs: list[Document]):
     def format_docs(retrieved: list[Document]) -> str:
         return "\n\n".join(d.page_content for d in retrieved)
 
-    llm = ChatOpenAI(model=LLM_MODEL, temperature=0)
+    llm = ChatOllama(model=OLLAMA_MODEL, temperature=0)
 
     return (
         {"context": retriever | format_docs, "question": RunnablePassthrough()}
@@ -78,18 +87,19 @@ def build_chain(docs: list[Document]):
 
 # ── Entry Point ────────────────────────────────────────────────────────────────
 def main() -> None:
-    if not os.getenv("OPENAI_API_KEY"):
-        sys.exit("[ERROR] OPENAI_API_KEY environment variable is not set.")
-    if not os.path.exists(FAQ_CSV):
+    if not __import__("os").path.exists(FAQ_CSV):
         sys.exit(f"[ERROR] Dataset not found: {FAQ_CSV}")
 
-    print("Loading FAQ dataset and building vector index...")
-    docs  = load_documents(FAQ_CSV)
+    print(f"Loading FAQ dataset...")
+    docs = load_documents(FAQ_CSV)
+    print(f"Loaded {len(docs)} FAQ entries.")
+
     chain = build_chain(docs)
-    print(f"Ready — {len(docs)} FAQs indexed.\n")
+    print(f"Ready.\n")
 
     print("=" * 55)
     print("  RoombaBot — iRobot Roomba Support Assistant")
+    print("  Powered by Ollama + llama3.2 (100% local)")
     print("  Type 'exit' to quit.")
     print("=" * 55 + "\n")
 

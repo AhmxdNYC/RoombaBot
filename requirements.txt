@@ -1,7 +1,8 @@
 langchain
-langchain-openai
+langchain-ollama
 langchain-community
 langchain-core
-openai
+langchain-huggingface
 faiss-cpu
 pandas
+sentence-transformers
