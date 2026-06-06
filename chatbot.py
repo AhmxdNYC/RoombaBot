@@ -13,11 +13,12 @@ Usage:
     python chatbot.py
 """
 
+import os
 import sys
 import warnings
-import pandas as pd
+warnings.filterwarnings("ignore")
 
-warnings.filterwarnings("ignore", category=DeprecationWarning)
+import pandas as pd
 
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
